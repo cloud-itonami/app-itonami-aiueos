@@ -1,0 +1,74 @@
+(ns aiueos.session.route
+  "Addressable views of the hosted daily shell.
+
+  One document, fragment routes (root ADR-2608080100 / adr-2608221625).
+  The nav is generated from `views` so a view cannot exist without being
+  reachable. Unknown, empty and nil fragments land on the default rather
+  than rendering nothing."
+  (:require [jp-go-dds.core :as dds]
+            [aiueos.session.app-catalog :as app-catalog]
+            [kotoba.lang.text :as str]))
+
+(def app-entries
+  "The four launchable apps, with labels from the shared Kotoba catalog."
+  (mapv (fn [app-id]
+          (let [id (app-catalog/app-route-id app-id)
+                title (app-catalog/app-title app-id)]
+            {:id id
+             :fragment (str "#" (name id))
+             :label title
+             :icon (subs title 0 1)
+             :body (app-catalog/app-body app-id)}))
+        (range 1 (inc (app-catalog/app-count)))))
+
+(def views
+  "AIUEOS opens on the desktop. App routes share the Browser catalog; session
+  and compositor tools remain addressable as system apps."
+  (vec
+   (concat
+    [{:id :desktop :fragment "#desktop" :label "デスクトップ"}]
+    app-entries
+    [{:id :session :fragment "#session" :label "セッション"}
+     {:id :compositor :fragment "#compositor" :label "Compositor"}
+     {:id :setup :fragment "#setup" :label "セットアップ"}
+     {:id :manage :fragment "#manage" :label "管理"}
+     {:id :devices :fragment "#devices" :label "機械"}])))
+
+(def default-view (first views))
+
+(def fragment-aliases
+  "Keep the prior operator fragment addressable after it became an app."
+  {"#operator" "#itonami"})
+
+(defn- normalize-fragment
+  [fragment]
+  (let [raw (or fragment "")
+        cut (first (str/split raw #"\?"))
+        with-hash (cond
+                    (str/blank? cut) ""
+                    (str/starts-with? cut "#") cut
+                    :else (str "#" cut))
+        stripped (str/replace with-hash #"^#/" "#")
+        aliased (get fragment-aliases stripped stripped)]
+    (if (or (str/blank? aliased) (= "#" aliased) (= "#/" aliased))
+      (:fragment default-view)
+      aliased)))
+
+(defn fragment->view
+  [fragment]
+  (let [f (normalize-fragment fragment)]
+    (or (first (filter #(= (:fragment %) f) views))
+        (first (filter #(str/starts-with? f (str "#" (name (:id %)))) views))
+        default-view)))
+
+(defn nav
+  "Real links that are still DADS controls. No app CSS for the switcher."
+  [active-id]
+  (into [:nav {:class "dds-ext-row session-nav" :aria-label "Views"}]
+        (for [{:keys [id fragment label]} views
+              :let [active? (= id active-id)]]
+          (dds/button label {:type (if active? :solid-fill :text)
+                             :size "sm"
+                             :href fragment
+                             :attrs (cond-> {}
+                                      active? (assoc :aria-current "page"))}))))

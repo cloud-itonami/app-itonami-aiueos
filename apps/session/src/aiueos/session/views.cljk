@@ -1,0 +1,331 @@
+(ns aiueos.session.views
+  "DADS hiccup for each fragment of the hosted daily shell.
+
+  Markup only. Live kotobase / murakumo bytes leave through the session
+  process (`/api/session/*`), not from this namespace."
+  (:require [aiueos.session.route :as route]
+            [jp-go-dds.core :as dds]))
+
+(defn- view-section
+  [{:keys [id hidden?]} & children]
+  (into [:section (cond-> {:id (name id)
+                           :class "dds-ext-section session-view"
+                           :data-view (name id)}
+                    hidden? (assoc :hidden true))]
+        children))
+
+(defn session-view
+  "Daily driver: read a CID, complete an inference, from this shell."
+  []
+  (view-section {:id :session}
+    (dds/heading 1 "今日のシェル" {:size "32"})
+    [:p {:class "session-lede"}
+     "ホストされた aiueos セッションです。CID は "
+     [:code "https://kotobase.net"]
+     " から、推論は "
+     [:code "murakumo-main"]
+     " 経由で、この文書のボタンがセッション過程に頼んで動かします。"
+     " `kbb -M:cloud-live check` は別の CLI で、この gate ではありません。"]
+    (dds/card
+     (dds/heading 2 "kotobase を読む" {:size "24"})
+     [:p "既定 CID は空バイト列の raw CIDv1。ゲートウェイが 200 と 0 バイトを返し、セッションがハッシュを CID と突き合わせます。"]
+     (dds/button "CID を読む" {:id "read-cid" :size "md"})
+     [:pre {:id "cid-out" :class "session-out"}])
+    (dds/card
+     (dds/heading 2 "murakumo で推論する" {:size "24"})
+     [:p "モデル id は焼きません。alias は "
+      [:code "murakumo-main"]
+      "。POST はセッション過程が "
+      [:code "infer.murakumo.cloud"]
+      " へ送ります。"]
+     (dds/button "推論する" {:id "run-infer" :size "md"})
+     [:pre {:id "infer-out" :class "session-out"}])
+    (dds/card
+     (dds/heading 2 "notes guest" {:size "24"})
+     [:p "Kotoba guest "
+      [:code "app/notes"]
+      " は grant を通ったときだけこのシェルに現れます。"
+      " 拒否は "
+      [:code "unresolved-capability"]
+      " など grant の理由で、汎用 500 ではありません。"]
+     (dds/button "grant して走らせる" {:id "run-guest" :size "md"})
+     (dds/button "grant を拒否する" {:id "deny-guest" :size "md"})
+     [:pre {:id "guest-out" :class "session-out"}])))
+
+
+(defn- wm-titlebar
+  [id title]
+  [:header {:class "wm-titlebar dds-ext-row"
+            :data-raise (str id)}
+   (dds/heading 2 title {:size "16" :id (str "wm-title-" id)})
+   (dds/chip-label "フォーカス" {:color "blue" :style "filled-1"})
+   (dds/button "前面へ" {:id (str "wm-raise-" id)
+                        :size "sm"
+                        :type :outline
+                        :attrs {:data-raise (str id)}})])
+
+(defn- wm-guest-body
+  [id title guest-kind src]
+  (if (= guest-kind :kami)
+    [:canvas {:id "kami-viewport"
+              :class "kami-viewport wm-guest"
+              :width "640"
+              :height "360"
+              :data-engine "kami.webgpu.ir"
+              :data-executor "kami.webgpu"
+              :tabindex "0"
+              :aria-label "kami WebGPU guest surface"}]
+    [:div {:class "wm-guest"
+           :id (str "wm-guest-" id)
+           :tabindex "0"
+           :data-src (or src "")
+           :aria-label title}
+     [:p {:class "session-lede"}
+      "guest "
+      [:code (or src title)]]]))
+
+(defn- wm-window
+  "One stacked surface with a DADS title bar. Guest body is not a nested
+  copy of this SPA. Kami content is the WebGPU canvas."
+  [{:keys [id title guest-kind src]}]
+  [:article {:class "wm-window"
+             :id (str "wm-window-" id)
+             :data-window-id (str id)
+             :data-guest (name guest-kind)}
+   (wm-titlebar id title)
+   [:div {:class "wm-body"}
+    (wm-guest-body id title guest-kind src)]])
+
+(defn- desktop-app
+  [{:keys [id icon label fragment]}]
+  [:a {:class "desktop-app"
+       :href fragment
+       :data-app (name id)
+       :aria-label label}
+   [:span {:class "desktop-app-icon" :aria-hidden "true"} icon]
+   [:span {:class "desktop-app-label"} label]])
+
+(defn- dock-app
+  [{:keys [id icon label fragment]}]
+  [:a (cond-> {:class "dock-app" :href fragment :aria-label label}
+        id (assoc :data-app (name id)))
+   [:span {:class "dock-app-icon" :aria-hidden "true"} icon]
+   [:span {:class "dock-app-label"} label]])
+
+(defn desktop-view
+  "AIUEOS home screen. App routes are ordinary Kotoba Browser document links."
+  []
+  (view-section {:id :desktop}
+    [:div {:class "desktop-surface"}
+     [:div {:class "desktop-menubar"}
+      [:a {:href "#desktop" :class "desktop-brand"} "AIUEOS"]
+      [:span {:class "desktop-menubar-app"} "Kotoba Browser"]
+      [:span {:class "desktop-menubar-spacer"}]
+      [:a {:href "#session" :class "desktop-menu-link"} "Session"]
+      [:a {:href "#compositor" :class "desktop-menu-link"} "Window Lab"]
+      [:a {:href "#manage" :class "desktop-menu-link"} "Settings"]]
+     [:div {:class "desktop-welcome"}
+      (dds/heading 1 "AIUEOS" {:size "32"})
+      [:p {:class "session-lede"} "Kotoba Browser からアプリを開く"]]
+     (into [:nav {:class "desktop-app-grid" :aria-label "Applications"}]
+           (map desktop-app route/app-entries))
+     [:div {:class "desktop-dock-wrap"}
+      (into [:nav {:class "desktop-dock" :aria-label "Dock"}]
+            (concat (map dock-app route/app-entries)
+                    [[:span {:class "dock-divider" :aria-hidden "true"}]
+                     (dock-app {:icon "⚙" :label "Settings" :fragment "#manage"})]))]
+     [:footer {:class "desktop-footer"}
+      "Kotoba · Amu · AIUEOS"]]))
+
+(defn murakumo-view
+  []
+  (view-section {:id :murakumo :hidden? true}
+    [:article {:class "app-window"}
+     [:header {:class "app-window-head"}
+      [:a {:class "window-close" :href "#desktop" :aria-label "Close app"} "×"]
+      [:span {:class "app-window-title"} "Murakumo"]
+      [:span {:class "window-spacer"}]
+      [:span {:class "app-window-state"} "Inference"]]
+     [:div {:class "app-window-body"}
+      (dds/heading 1 "Murakumo" {:size "32"})
+      [:p {:class "session-lede"}
+       "推論を kotoba のセッション過程から murakumo-main へ送ります。"]
+      (dds/card
+       (dds/heading 2 "Inference" {:size "24"})
+       [:p "モデル alias は murakumo-main です。実行結果はこのアプリに表示します。"]
+       (dds/button "推論する" {:id "app-run-infer" :size "md"})
+       [:pre {:id "app-infer-out" :class "session-out" :aria-live "polite"}])
+      [:a {:class "app-return" :href "#desktop"} "デスクトップへ"]]]))
+
+(defn yataverse-view
+  []
+  (view-section {:id :yataverse :hidden? true}
+    [:article {:class "app-window"}
+     [:header {:class "app-window-head"}
+      [:a {:class "window-close" :href "#desktop" :aria-label "Close app"} "×"]
+      [:span {:class "app-window-title"} "Yataverse"]
+      [:span {:class "window-spacer"}]
+      [:span {:class "app-window-state"} "Storage"]]
+     [:div {:class "app-window-body"}
+      (dds/heading 1 "Yataverse" {:size "32"})
+      [:p {:class "session-lede"} "データセットと保存領域を扱うアプリです。"]
+      (dds/card
+       (dds/heading 2 "Workspace" {:size "24"})
+       [:p "AIUEOS のデスクトップから起動しました。"]
+       [:p {:class "app-empty-state"}
+        "この AIUEOS ビルドには Yataverse の接続先がまだ登録されていません。"])
+      [:a {:class "app-return" :href "#desktop"} "デスクトップへ"]]]))
+
+(defn aozora-view
+  []
+  (view-section {:id :aozora :hidden? true}
+    [:article {:class "app-window"}
+     [:header {:class "app-window-head"}
+      [:a {:class "window-close" :href "#desktop" :aria-label "Close app"} "×"]
+      [:span {:class "app-window-title"} "Aozora"]
+      [:span {:class "window-spacer"}]
+      [:span {:class "app-window-state"} "Reader"]]
+     [:div {:class "app-window-body"}
+      (dds/heading 1 "Aozora" {:size "32"})
+      [:p {:class "session-lede"} "読書アプリ"]
+      [:section {:class "reader-empty" :aria-label "Book shelf"}
+       (dds/heading 2 "本棚" {:size "24"})
+       [:p "ライブラリはまだ空です。"]
+       [:p {:class "app-empty-state"}
+        "この AIUEOS ビルドには Aozora のカタログ接続がまだ登録されていません。"]]
+      [:a {:class "app-return" :href "#desktop"} "デスクトップへ"]]]))
+
+(defn compositor-view
+  "Window manager and IME lab. Kept separate from the app-launch desktop."
+  []
+  (view-section {:id :compositor :hidden? true}
+    (dds/heading 1 "Window Lab" {:size "32"})
+    [:p {:class "session-lede"}
+     "compositor 過程が window-session-state の 2 枚を重ねます。以下は hosted compositor の検証面です。"
+     " ゲスト browser-frame2 / browser-reduce は Kotoba で描画・入力を処理します。"]
+    [:div {:id "ime-bar"
+           :class "ime-bar dds-ext-row"
+           :data-ime "on"
+           :aria-label "input method"}
+     (dds/chip-label "かな" {:color "blue" :style "filled-1"})
+     (dds/heading 2 "変換中" {:size "16" :id "ime-preedit-label"})
+     [:p {:id "ime-preedit" :class "session-lede" :aria-live "polite"}]
+     [:p {:id "ime-buf" :class "session-lede"}]
+     [:div {:id "ime-candidates" :aria-label "kanji candidates"}]
+     (dds/button "IME 切" {:id "ime-toggle" :size "sm" :type :outline})]
+    [:div {:id "wm-stage"
+           :class "wm-stage"
+           :tabindex "0"
+           :aria-label "window-session-state"}
+     (wm-window {:id 1 :title "session" :guest-kind :session :src "/#session"})
+     (wm-window {:id 2 :title "guest-surface" :guest-kind :kami :src "kami.webgpu.ir"})]
+    [:pre {:id "compositor-out" :class "session-out" :hidden true}]
+    [:pre {:id "guest-desktop-out" :class "session-out"}]
+    [:pre {:id "kami-out" :class "session-out"}]
+    [:pre {:id "wm-input-out" :class "session-out"}]))
+
+(defn setup-view
+  []
+  (view-section {:id :setup :hidden? true}
+    (dds/heading 1 "この機械を追加" {:size "32"})
+    [:p {:class "session-lede"}
+     "Passkey をこの画面で使うか、スマホでコードを読み取ります。どちらも同じアカウント確認を通り、Passkey の秘密鍵は Node へコピーしません。"]
+    (dds/card
+     (dds/heading 2 "Passkey で続ける" {:size "24"})
+     [:p "この機械の Kotoba Browser から、"
+      [:code "auth.kotoba.cloud"]
+      " の Passkey を確認します。"]
+     (dds/button "Passkey で確認" {:id "start-passkey" :size "md"
+                                     :attrs {:data-kotoba-action "device-auth/start-passkey"}}))
+    (dds/card
+     (dds/heading 2 "スマホで続ける" {:size "24"})
+     [:p "スマホ側でも Passkey を確認してから、この機械を承認します。表示する承認URLにアカウント鍵や端末トークンは含めません。"]
+     [:img {:id "device-auth-qr" :class "device-auth-qr"
+            :alt "AIUEOSの端末承認ページを開くQRコード" :hidden true}]
+     [:pre {:id "qr" :class "session-out"}]
+     [:a {:id "device-auth-link" :class "dads-link"
+          :href "#" :target "_blank" :rel "noopener noreferrer" :hidden true}
+      "承認ページを開く"]
+     (dds/button "スマホ用コードを準備" {:id "start-phone-scan" :size "md"
+                                           :attrs {:data-kotoba-action "device-auth/start-phone-scan"}}))
+    [:pre {:id "auth-out" :class "session-out" :aria-live "polite"}]
+    [:details {:class "session-details"}
+     [:summary "hosted 検証用"]
+     [:p {:class "session-lede"}
+      "現在の Mac/QEMU fixture を検証するための非権威経路です。実機の OS アカウント認証には数えません。"]
+     (dds/form-field {:label "fixture 所有者" :for "owner"}
+                     (dds/input-text {:id "owner" :name "owner"
+                                      :value "acct:local-demo"
+                                      :autocomplete "username"}))
+     (dds/button "fixture を実行" {:id "bind" :size "md"})
+     [:pre {:id "bind-out" :class "session-out"}]]))
+
+(defn manage-view
+  []
+  (view-section {:id :manage :hidden? true}
+    (dds/heading 1 "管理" {:size "32"})
+    [:p {:class "session-lede"}
+     "電源サイクルは電話面から。ゲスト VGA は使いません。"]
+    [:pre {:id "status" :class "session-out"}]
+    (dds/button "電源サイクル" {:id "cycle" :size "md"})
+    [:pre {:id "cycle-out" :class "session-out"}]))
+
+(defn devices-view
+  []
+  (view-section {:id :devices :hidden? true}
+    (dds/heading 1 "機械" {:size "32"})
+    [:p {:class "session-lede"}
+     "アカウント確認後に端末鍵を証明すると Node 候補へ追加します。Murakumo の ready、Kekkai 接続、SSD キャッシュ同期は、それぞれ実測できるまで別の状態です。"]
+    [:pre {:id "device-plan-out" :class "session-out"}]
+    [:pre {:id "devices-out" :class "session-out"}]))
+
+(defn operator-view
+  "P4: live itonami.cloud from this same document. Consumer kotobase
+  / murakumo legs do not use this fragment."
+  []
+  (view-section {:id :itonami :hidden? true}
+    (dds/heading 1 "Itonami" {:size "32"})
+    [:p {:class "session-lede"}
+     "産業側は "
+     [:code "itonami.cloud"]
+     "（network-awai/cloud-itonami）です。kotobase でも murakumo でもありません。"
+     " grant が無い消費者セッションはここへ HTTP しません。"
+     " `#itonami` も同じ面です。"]
+    (dds/card
+     (dds/heading 2 "itonami に聞く" {:size "24"})
+     [:p "この過程が "
+      [:code "/api/health"]
+      " と "
+      [:code "/api/fleet/metrics"]
+      " を "
+      [:code "itonami.cloud"]
+      " へ GET します。拒否は "
+      [:code "operator-grant-required"]
+      " です。"]
+     (dds/button "運用 grant して読む" {:id "run-operator" :size "md"})
+     (dds/button "運用 grant を拒否する" {:id "deny-operator" :size "md"})
+     [:pre {:id "operator-out" :class "session-out"}])))
+
+(defn shell
+  "One Kotoba Browser document with app links and retained system views."
+  []
+  [:div {:class "session-shell"}
+   [:header {:class "session-chrome"}
+    [:a {:href "#desktop" :class "session-brand" :id "session-brand"} "AIUEOS"]
+    [:nav {:class "session-nav" :aria-label "System apps"}
+     [:a {:href "#desktop"} "Desktop"]
+     [:a {:href "#session"} "Session"]
+     [:a {:href "#compositor"} "Window Lab"]
+     [:a {:href "#setup"} "Setup"]
+     [:a {:href "#manage"} "Settings"]]]
+   [:main {:class "session-main"}
+    (desktop-view)
+    (murakumo-view)
+    (operator-view)
+    (yataverse-view)
+    (aozora-view)
+    (session-view)
+    (compositor-view)
+    (setup-view)
+    (manage-view)
+    (devices-view)]])
